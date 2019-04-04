@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Realtime Data Line Graph</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <base target="_blank">
+        <style>
+            #header {
+                width: 100%;
+                height: 30px;
+            }
+
+            #container {
+                width: 100%;
+                margin: auto;
+            }
+            #first {
+                width: 50%;
+                float: left;
+            }
+            #second {
+                width: 50%;
+                float: left;
+            }
+            #clear {
+                clear: both;
+            }
+            div.select {
+                margin: 0 0 1em 0;
+            }
+            body {
+                font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+            }
+        </style>
+        <script src="d3.v5.min.js"></script>
+        <script src="graph.js"></script>
+    </head>
+    <body>
+        <div id="header"></div>
+        <div id="container">
+            <div id="first">
+                <div class="select">
+                    <label for="videoSource">Video source: </label><select id="videoSource"></select>
+                </div>
+                <video muted autoplay></video>
+                <canvas id="output" style="display: none;"></canvas>
+            </div>
+            <div id="second">
+                <div id="chart"></div>
+            </div>
+
+            <div id="clear"></div>
+        </div>
+        <script>
+            function hasGetUserMedia() {
+                return !!(navigator.mediaDevices &&
+                        navigator.mediaDevices.getUserMedia);
+            }
+
+            if (hasGetUserMedia()) {
+                // Good to go!
+            } else {
+                alert('getUserMedia() is not supported by your browser');
+            }
+        </script>
+        <script>
+            var canvasElement = document.querySelector('#output');
+            var videoElement = document.querySelector('video');
+            var videoSelect = document.querySelector('select#videoSource');
+
+            navigator.mediaDevices.enumerateDevices()
+                    .then(gotDevices)
+                    .then(getStream)
+                    .catch(handleError);
+
+            videoSelect.onchange = getStream;
+
+            function gotDevices(deviceInfos) {
+                for (var i = 0; i !== deviceInfos.length; ++i) {
+                    var deviceInfo = deviceInfos[i];
+                    var option = document.createElement('option');
+                    option.value = deviceInfo.deviceId;
+                    if (deviceInfo.kind === 'videoinput') {
+                        option.text = deviceInfo.label || 'camera ' + (videoSelect.length + 1);
+                        videoSelect.appendChild(option);
+                    } else {
+                        console.log('Found one other kind of source/device: ', deviceInfo);
+                    }
+                }
+            }
+
+            function getStream() {
+                if (window.stream) {
+                    window.stream.getTracks().forEach(function (track) {
+                        track.stop();
+                    });
+                }
+
+                var constraints = {
+                    video: {
+                        deviceId: {exact: videoSelect.value}
+                    }
+                };
+
+                navigator.mediaDevices.getUserMedia(constraints).
+                        then(gotStream).catch(handleError);
+            }
+
+            function gotStream(stream) {
+                window.stream = stream; // make stream available to console
+                videoElement.srcObject = stream;
+            }
+
+            function handleError(error) {
+                console.log('Error: ', error);
+            }
+
+            var lineArr = [];
+            var MAX_LENGTH = 100;
+            var duration = 500;
+            var chart = realTimeLineChart();
+
+            function resize() {
+                if (d3.select("#chart svg").empty()) {
+                    return;
+                }
+                chart.width(+d3.select("#chart").style("width").replace(/(px)/g, ""));
+                d3.select("#chart").call(chart);
+            }
+
+            function draw() {
+                var h = videoElement.videoHeight;
+                var w = videoElement.videoWidth;
+                canvasElement.height = h;
+                canvasElement.width = w;
+                var ct = canvasElement.getContext('2d');
+                ct.drawImage(videoElement, 0, 0);
+                var inputData = ct.getImageData(0, 0, w, h).data;
+                // gray
+                var rsum = 0.0;
+                var gsum = 0.0;
+                var bsum = 0.0;
+                for (var y = 0; y < h; y += 1) {
+                    for (var x = 0; x < w; x += 1) {
+                        var pixel = (y * w + x) * 4;
+                        // RGBA
+                        rsum += inputData[pixel + 0];
+                        gsum += inputData[pixel + 1];
+                        bsum += inputData[pixel + 2];
+                    }
+                }
+                var now = new Date();
+                var lineData = {
+                    time: now,
+                    x: bsum,
+                    y: rsum,
+                    z: gsum
+                };
+                lineArr.push(lineData);
+                if (lineArr.length > 100) {
+                    lineArr.shift();
+                }
+                d3.select("#chart").datum(lineArr).call(chart);
+            };
+            document.addEventListener("DOMContentLoaded", function () {
+                window.setInterval(draw, 100);
+                d3.select("#chart").datum(lineArr).call(chart);
+                d3.select(window).on('resize', resize);
+            });
+        </script>
+    </body>
+</html>
